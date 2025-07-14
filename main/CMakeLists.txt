@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS
         main.c
-        wifi.c
+        main_wifi.c
 
     PRIV_INCLUDE_DIRS
         .
@@ -11,4 +11,5 @@ idf_component_register(
         esp_wifi
         esp_event
         esp_netif
+        mqtt
 )

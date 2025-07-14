@@ -1,4 +1,4 @@
-#include "wifi.h"
+#include "main_wifi.h"
 
 #include <inttypes.h>
 #include <string.h>
@@ -90,7 +90,7 @@ static void wifi_event_cb(void *arg, esp_event_base_t event_base, int32_t event_
 }
 
 
-esp_err_t wifi_init(void)
+esp_err_t app_wifi_init(void)
 {
     // Initialize Non-Volatile Storage (NVS)
     esp_err_t ret = nvs_flash_init();
@@ -142,7 +142,7 @@ esp_err_t wifi_init(void)
     return ret;
 }
 
-esp_err_t wifi_connect(char* wifi_ssid, char* wifi_password)
+esp_err_t app_wifi_connect(char* wifi_ssid, char* wifi_password)
 {
     wifi_config_t wifi_config = {
         .sta = {
@@ -178,7 +178,7 @@ esp_err_t wifi_connect(char* wifi_ssid, char* wifi_password)
     return ESP_FAIL;
 }
 
-esp_err_t wifi_disconnect(void)
+esp_err_t app_wifi_disconnect(void)
 {
     if (s_wifi_event_group) {
         vEventGroupDelete(s_wifi_event_group);
@@ -187,7 +187,7 @@ esp_err_t wifi_disconnect(void)
     return esp_wifi_disconnect();
 }
 
-esp_err_t wifi_deinit(void)
+esp_err_t app_wifi_deinit(void)
 {
     esp_err_t ret = esp_wifi_stop();
     if (ret == ESP_ERR_WIFI_NOT_INIT) {
