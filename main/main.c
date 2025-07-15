@@ -6,6 +6,9 @@
 #include "esp_mac.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
+#include "esp_timer.h"
+#include "esp_event.h"
+#include "esp_sleep.h"
 
 #include "sys/param.h"
 
@@ -115,6 +118,17 @@
 #define MQTT_BROKER_URI "mqtt://broker.hivemq.com"
 #define MQTT_BROKER_TOPIC "IeziPVyPNYnaOW4U/"
 
+#define TAG "main"
+#define MAX_MEASUREMENTS 100
+#define NVS_NAMESPACE "measurements"
+#define NVS_KEY_COUNTER "counter"
+
+int64_t wifi_connect_times[MAX_MEASUREMENTS];
+int64_t mqtt_connect_times[MAX_MEASUREMENTS];
+int64_t capture_send_times[MAX_MEASUREMENTS];
+
+int measurement_index = 0;
+
 #if ESP_CAMERA_SUPPORTED
 static camera_config_t camera_config = {
     .pin_pwdn = CAM_PIN_PWDN,
@@ -223,14 +237,25 @@ static void camera_loop(esp_mqtt_client_handle_t client)
 
 void app_main(void)
 {
+	int64_t wifi_start_time, wifi_end_time;
+
     ESP_LOGI(TAG, "Starting...");
     
+	wifi_start_time = esp_timer_get_time();
+
+	ESP_LOGI(TAG, "WiFi connection established in : %lld milliseconds", wifi_start_time/1000);
+
     ESP_ERROR_CHECK(app_wifi_init());
 
     esp_err_t ret = app_wifi_connect(WIFI_SSID, WIFI_PASSWORD);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect to Wi-Fi network");
     }
+
+	wifi_end_time = esp_timer_get_time();
+    wifi_connect_times[measurement_index] = wifi_end_time - wifi_start_time;
+
+    ESP_LOGI(TAG, "WiFi connected in %.2f ms", (float) capture_send_times[measurement_index]/1000);
 
     wifi_ap_record_t ap_info;
     ret = esp_wifi_sta_get_ap_info(&ap_info);

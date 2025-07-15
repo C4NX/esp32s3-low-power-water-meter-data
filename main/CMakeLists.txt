@@ -12,5 +12,6 @@ idf_component_register(
         esp_event
         esp_netif
         esp_psram
+		esp_timer
         mqtt
 )
