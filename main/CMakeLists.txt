@@ -13,5 +13,6 @@ idf_component_register(
         esp_netif
         esp_psram
 		esp_timer
+		esp_http_server
         mqtt
 )

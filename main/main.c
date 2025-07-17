@@ -20,6 +20,8 @@
 #include "wifi_credentials.h"
 #include "main_wifi.h"
 
+#include "esp_http_server.h"	// HTTP server
+
 // support IDF 5.x
 #ifndef portTICK_RATE_MS
 #define portTICK_RATE_MS portTICK_PERIOD_MS
@@ -237,6 +239,23 @@ static void camera_loop(esp_mqtt_client_handle_t client)
 
 void app_main(void)
 {
+	// Create a local WiFi access point
+	esp_netif_create_default_wifi_ap();
+	wifi_config_t ap_config = {
+		.ap = {
+			.ssid = "WaterMeter-Setup",
+			.ssid_len = strlen("WaterMeter-Setup"),
+			.password = "",
+			.max_connection = 2,
+			.authmode = WIFI_AUTH_OPEN
+		}
+	};
+	esp_wifi_set_mode(WIFI_MODE_AP);
+	esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+	esp_wifi_start();
+
+
+
 	int64_t wifi_start_time, wifi_end_time;
 
     ESP_LOGI(TAG, "Starting...");
@@ -252,10 +271,10 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to connect to Wi-Fi network");
     }
 
+	// Variante
 	wifi_end_time = esp_timer_get_time();
     wifi_connect_times[measurement_index] = wifi_end_time - wifi_start_time;
-
-    ESP_LOGI(TAG, "WiFi connected in %.2f ms", (float) capture_send_times[measurement_index]/1000);
+	ESP_LOGI(TAG, "WiFi connected in %.2f ms", (float) wifi_connect_times[measurement_index]/1000);
 
     wifi_ap_record_t ap_info;
     ret = esp_wifi_sta_get_ap_info(&ap_info);
