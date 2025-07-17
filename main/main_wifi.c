@@ -89,46 +89,36 @@ static void wifi_event_cb(void *arg, esp_event_base_t event_base, int32_t event_
     }
 }
 
-
 esp_err_t app_wifi_init(void)
 {
-    // Initialize Non-Volatile Storage (NVS)
+    // Initialiser NVS (stockage non volatile)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
 
+    // Créer le groupe d'événements pour suivre la connexion Wi-Fi
     s_wifi_event_group = xEventGroupCreate();
 
-    ret = esp_netif_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize TCP/IP network stack");
-        return ret;
-    }
+    // Initialisation de la pile TCP/IP et de la boucle d’événements
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    ret = esp_event_loop_create_default();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create default event loop");
-        return ret;
-    }
+    // Créer les interfaces AP et STA
+    esp_netif_t* ap_netif = esp_netif_create_default_wifi_ap();
+    wifi_netif = esp_netif_create_default_wifi_sta(); // Pour la STA
 
-    ret = esp_wifi_set_default_wifi_sta_handlers();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set default handlers");
-        return ret;
-    }
-
-    wifi_netif = esp_netif_create_default_wifi_sta();
-    if (wifi_netif == NULL) {
-        ESP_LOGE(TAG, "Failed to create default WiFi STA interface");
+    if (!ap_netif || !wifi_netif) {
+        ESP_LOGE(TAG, "Failed to create Wi-Fi netifs");
         return ESP_FAIL;
     }
 
-    // Wi-Fi stack configuration parameters
+    // Configuration du Wi-Fi
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
+    // Enregistrer les gestionnaires d'événements
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                                                         ESP_EVENT_ANY_ID,
                                                         &wifi_event_cb,
@@ -139,7 +129,26 @@ esp_err_t app_wifi_init(void)
                                                         &ip_event_cb,
                                                         NULL,
                                                         &ip_event_handler));
-    return ret;
+
+    // Configurer le point d'accès
+    wifi_config_t ap_config = {
+        .ap = {
+            .ssid = "WaterMeter-Setup",
+            .ssid_len = strlen("WaterMeter-Setup"),
+            .password = "",
+            .max_connection = 2,
+            .authmode = WIFI_AUTH_OPEN
+        }
+    };
+
+    // Activer le mode AP + STA
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+
+    // Démarrer le Wi-Fi (le mode STA sera configuré plus tard dans app_wifi_connect)
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    return ESP_OK;
 }
 
 esp_err_t app_wifi_connect(char* wifi_ssid, char* wifi_password)
@@ -157,7 +166,9 @@ esp_err_t app_wifi_connect(char* wifi_ssid, char* wifi_password)
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE)); // default is WIFI_PS_MIN_MODEM
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM)); // default is WIFI_STORAGE_FLASH
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    //ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA)); // TODO : remove
+	ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
     ESP_LOGI(TAG, "Connecting to Wi-Fi network: %s", wifi_config.sta.ssid);

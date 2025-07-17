@@ -21,6 +21,10 @@
 #include "main_wifi.h"
 
 #include "esp_http_server.h"	// HTTP server
+#include "esp_littlefs.h" // LittleFS
+
+#include <dirent.h>	// tempo
+
 
 // support IDF 5.x
 #ifndef portTICK_RATE_MS
@@ -237,28 +241,93 @@ static void camera_loop(esp_mqtt_client_handle_t client)
 #endif
 }
 
+// Mount LittleFS
+void mount_littlefs(void)
+{
+    const esp_vfs_littlefs_conf_t conf = {
+        .base_path = "/littlefs",
+        .partition_label = "littlefs",
+        .format_if_mount_failed = true,
+        .dont_mount = false
+    };
+
+    esp_err_t err = esp_vfs_littlefs_register(&conf);
+    if (err != ESP_OK) {
+        ESP_LOGE("LITTLEFS", "Failed to mount LittleFS (%s)", esp_err_to_name(err));
+        return;
+    }
+
+    size_t total = 0, used = 0;
+    esp_littlefs_info("littlefs", &total, &used);
+    ESP_LOGI("LITTLEFS", "Partition size: total=%d, used=%d", total, used);
+}
+
+// Display the content via HTTP
+esp_err_t index_handler(httpd_req_t *req)
+{
+    FILE* f = fopen("/littlefs/index.html", "r");
+    if (!f) {
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    char line[128];
+    while (fgets(line, sizeof(line), f)) {
+        httpd_resp_sendstr_chunk(req, line);
+    }
+    fclose(f);
+    httpd_resp_sendstr_chunk(req, NULL); // End response
+    return ESP_OK;
+}
+
+
 void app_main(void)
 {
-	// Create a local WiFi access point
-	esp_netif_create_default_wifi_ap();
-	wifi_config_t ap_config = {
-		.ap = {
-			.ssid = "WaterMeter-Setup",
-			.ssid_len = strlen("WaterMeter-Setup"),
-			.password = "",
-			.max_connection = 2,
-			.authmode = WIFI_AUTH_OPEN
-		}
-	};
-	esp_wifi_set_mode(WIFI_MODE_AP);
-	esp_wifi_set_config(WIFI_IF_AP, &ap_config);
-	esp_wifi_start();
-
-
-
 	int64_t wifi_start_time, wifi_end_time;
 
     ESP_LOGI(TAG, "Starting...");
+
+	// test et Initialiser LittleFS
+	esp_vfs_littlefs_conf_t conf = {
+		.base_path = "/littlefs",
+		.partition_label = "littlefs",
+		.format_if_mount_failed = true,
+		.dont_mount = false,
+	};
+
+	esp_err_t err = esp_vfs_littlefs_register(&conf);
+	if (err != ESP_OK) {
+		ESP_LOGE(TAG, "Failed to mount LittleFS (%s)", esp_err_to_name(err));
+	} else {
+		ESP_LOGI(TAG, "LittleFS mounted at /littlefs");
+		// code tempo
+		DIR* dir = opendir("/littlefs");
+		if (dir == NULL) {
+			ESP_LOGE(TAG, "Erreur : le dossier /littlefs n'existe pas");
+		} else {
+			ESP_LOGI(TAG, "Contenu de /littlefs :");
+			struct dirent* ent;
+			while ((ent = readdir(dir)) != NULL) {
+				ESP_LOGI(TAG, "  - %s", ent->d_name);
+			}
+			closedir(dir);
+		}
+		// end code tempo
+
+		// Exemple de lecture de fichier HTML
+		FILE* f = fopen("/littlefs/index.html", "r");
+		if (f == NULL) {
+			ESP_LOGE(TAG, "Failed to open /littlefs/index.html");
+		} else {
+			char line[128];
+			while (fgets(line, sizeof(line), f)) {
+				ESP_LOGI(TAG, "%s", line);
+			}
+			fclose(f);
+		}
+	}
+
+	// endtest
     
 	wifi_start_time = esp_timer_get_time();
 
