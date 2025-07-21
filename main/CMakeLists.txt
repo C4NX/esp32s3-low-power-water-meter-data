@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         main.c
         main_wifi.c
+        config/config_handler.c
 
     PRIV_INCLUDE_DIRS
         .

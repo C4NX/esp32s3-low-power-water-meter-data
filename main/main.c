@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_mac.h"
@@ -9,32 +8,37 @@
 #include "esp_timer.h"
 #include "esp_event.h"
 #include "esp_sleep.h"
-
 #include "sys/param.h"
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
 #include "mqtt_client.h"
+#include "esp_http_server.h"  // HTTP server
+#include "esp_littlefs.h"     // LittleFS
+#include <dirent.h>           // Directory listing
 
-#include "wifi_credentials.h"
-#include "main_wifi.h"
+#include "wifi_credentials.h" // Default wifi credentials
+#include "main_wifi.h" // AP/ST Wifi Code
 
-#include "esp_http_server.h"	// HTTP server
-#include "esp_littlefs.h" // LittleFS
+#include "config/config_handler.c" // config route 
 
-#include <dirent.h>	// tempo
-
-
-// support IDF 5.x
+// Support for IDF 5.x
 #ifndef portTICK_RATE_MS
 #define portTICK_RATE_MS portTICK_PERIOD_MS
 #endif
 
 #include "esp_camera.h"
 
+// Board selection
 #define BOARD_WROVER_KIT 1
 
+// Logging tag
+#define TAG "main"
+
+// MQTT Broker
+#define MQTT_BROKER_URI "mqtt://broker.hivemq.com"
+#define MQTT_BROKER_TOPIC "IeziPVyPNYnaOW4U/"
+
+// Camera configuration
 // WROVER-KIT PIN Map
 #ifdef BOARD_WROVER_KIT
 
@@ -121,20 +125,7 @@
 #define CAM_PIN_D7 16
 #endif
 
-#define MQTT_BROKER_URI "mqtt://broker.hivemq.com"
-#define MQTT_BROKER_TOPIC "IeziPVyPNYnaOW4U/"
-
-#define TAG "main"
-#define MAX_MEASUREMENTS 100
-#define NVS_NAMESPACE "measurements"
-#define NVS_KEY_COUNTER "counter"
-
-int64_t wifi_connect_times[MAX_MEASUREMENTS];
-int64_t mqtt_connect_times[MAX_MEASUREMENTS];
-int64_t capture_send_times[MAX_MEASUREMENTS];
-
-int measurement_index = 0;
-
+// Camera config
 #if ESP_CAMERA_SUPPORTED
 static camera_config_t camera_config = {
     .pin_pwdn = CAM_PIN_PWDN,
@@ -171,7 +162,6 @@ static camera_config_t camera_config = {
 
 static esp_err_t init_camera(void)
 {
-    //initialize the camera
     esp_err_t err = esp_camera_init(&camera_config);
     if (err != ESP_OK)
     {
@@ -188,18 +178,16 @@ static void mqtt_event_handler_cb(void *handler_args, esp_event_base_t base, int
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
     esp_mqtt_event_handle_t event = event_data;
     esp_mqtt_client_handle_t client = event->client;
-    int msg_id;
-
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-            msg_id = esp_mqtt_client_publish(client, MQTT_BROKER_TOPIC, "Hello from ESP32S3!", 0, 0, 0);
+            esp_mqtt_client_publish(client, MQTT_BROKER_TOPIC, "Hello from ESP32S3!", 0, 0, 0);
             break;
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
             break;
         default:
-            ESP_LOGI(TAG, "Other event id:%d", event->event_id);
+            ESP_LOGI(TAG, "Other MQTT event id:%d", event->event_id);
             break;
     }
 }
@@ -207,12 +195,11 @@ static void mqtt_event_handler_cb(void *handler_args, esp_event_base_t base, int
 static esp_mqtt_client_handle_t mqtt_app_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = MQTT_BROKER_URI, // Public broker for testing
+        .broker.address.uri = MQTT_BROKER_URI,
     };
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler_cb, client);
     esp_mqtt_client_start(client);
-    
     return client;
 }
 
@@ -228,7 +215,7 @@ static void camera_loop(esp_mqtt_client_handle_t client)
         ESP_LOGI(TAG, "Taking picture...");
         camera_fb_t *pic = esp_camera_fb_get();
 
-        esp_mqtt_client_publish(client, MQTT_BROKER_TOPIC, (const char *)pic->buf, pic->len, 0, 0);
+        // esp_mqtt_client_publish(client, MQTT_BROKER_TOPIC, (const char *)pic->buf, pic->len, 0, 0);
 
         ESP_LOGI(TAG, "Picture taken! Its size was: %zu bytes", pic->len);
         esp_camera_fb_return(pic);
@@ -241,7 +228,6 @@ static void camera_loop(esp_mqtt_client_handle_t client)
 #endif
 }
 
-// Mount LittleFS
 void mount_littlefs(void)
 {
     const esp_vfs_littlefs_conf_t conf = {
@@ -250,19 +236,18 @@ void mount_littlefs(void)
         .format_if_mount_failed = true,
         .dont_mount = false
     };
-
     esp_err_t err = esp_vfs_littlefs_register(&conf);
     if (err != ESP_OK) {
-        ESP_LOGE("LITTLEFS", "Failed to mount LittleFS (%s)", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to mount LittleFS (%s)", esp_err_to_name(err));
         return;
     }
-
     size_t total = 0, used = 0;
     esp_littlefs_info("littlefs", &total, &used);
-    ESP_LOGI("LITTLEFS", "Partition size: total=%d, used=%d", total, used);
+    ESP_LOGI(TAG, "LittleFS: total=%d, used=%d", total, used);
 }
 
-// Display the content via HTTP
+httpd_handle_t server = NULL;
+
 esp_err_t index_handler(httpd_req_t *req)
 {
     FILE* f = fopen("/littlefs/index.html", "r");
@@ -270,7 +255,6 @@ esp_err_t index_handler(httpd_req_t *req)
         httpd_resp_send_404(req);
         return ESP_FAIL;
     }
-
     char line[128];
     while (fgets(line, sizeof(line), f)) {
         httpd_resp_sendstr_chunk(req, line);
@@ -280,91 +264,66 @@ esp_err_t index_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static void start_webserver(void)
+{
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = 80;
+
+    ESP_LOGI(TAG, "Starting HTTP server on port 80");
+
+    if (httpd_start(&server, &config) == ESP_OK) {
+        httpd_register_uri_handler(server, &(httpd_uri_t){
+            .uri = "/",
+            .method = HTTP_GET,
+            .handler = index_handler,
+            .user_ctx = NULL
+        });
+        httpd_register_uri_handler(server, &(httpd_uri_t){
+            .uri = "/config",
+            .method = HTTP_POST,
+            .handler = config_handler,
+            .user_ctx = NULL
+        });
+        ESP_LOGI(TAG, "HTTP server started");
+    } else {
+        ESP_LOGE(TAG, "Failed to start HTTP server");
+    }
+}
 
 void app_main(void)
 {
-	int64_t wifi_start_time, wifi_end_time;
 
     ESP_LOGI(TAG, "Starting...");
 
-	// test et Initialiser LittleFS
-	esp_vfs_littlefs_conf_t conf = {
-		.base_path = "/littlefs",
-		.partition_label = "littlefs",
-		.format_if_mount_failed = true,
-		.dont_mount = false,
-	};
+    // Initialize NVS
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
 
-	esp_err_t err = esp_vfs_littlefs_register(&conf);
-	if (err != ESP_OK) {
-		ESP_LOGE(TAG, "Failed to mount LittleFS (%s)", esp_err_to_name(err));
-	} else {
-		ESP_LOGI(TAG, "LittleFS mounted at /littlefs");
-		// code tempo
-		DIR* dir = opendir("/littlefs");
-		if (dir == NULL) {
-			ESP_LOGE(TAG, "Erreur : le dossier /littlefs n'existe pas");
-		} else {
-			ESP_LOGI(TAG, "Contenu de /littlefs :");
-			struct dirent* ent;
-			while ((ent = readdir(dir)) != NULL) {
-				ESP_LOGI(TAG, "  - %s", ent->d_name);
-			}
-			closedir(dir);
-		}
-		// end code tempo
+    mount_littlefs();
 
-		// Exemple de lecture de fichier HTML
-		FILE* f = fopen("/littlefs/index.html", "r");
-		if (f == NULL) {
-			ESP_LOGE(TAG, "Failed to open /littlefs/index.html");
-		} else {
-			char line[128];
-			while (fgets(line, sizeof(line), f)) {
-				ESP_LOGI(TAG, "%s", line);
-			}
-			fclose(f);
-		}
-	}
-
-	// endtest
-    
-	wifi_start_time = esp_timer_get_time();
-
-	ESP_LOGI(TAG, "WiFi connection established in : %lld milliseconds", wifi_start_time/1000);
-
-    ESP_ERROR_CHECK(app_wifi_init());
-
-    esp_err_t ret = app_wifi_connect(WIFI_SSID, WIFI_PASSWORD);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to connect to Wi-Fi network");
+    DIR* dir = opendir("/littlefs");
+    if (dir != NULL) {
+        ESP_LOGI(TAG, "Contents of /littlefs:");
+        struct dirent* ent;
+        while ((ent = readdir(dir)) != NULL) {
+            ESP_LOGI(TAG, "  - %s", ent->d_name);
+        }
+        closedir(dir);
     }
 
-	// Variante
-	wifi_end_time = esp_timer_get_time();
-    wifi_connect_times[measurement_index] = wifi_end_time - wifi_start_time;
-	ESP_LOGI(TAG, "WiFi connected in %.2f ms", (float) wifi_connect_times[measurement_index]/1000);
-
-    wifi_ap_record_t ap_info;
-    ret = esp_wifi_sta_get_ap_info(&ap_info);
-    if (ret == ESP_ERR_WIFI_CONN) {
-        ESP_LOGE(TAG, "Wi-Fi station interface not initialized");
-    }
-    else if (ret == ESP_ERR_WIFI_NOT_CONNECT) {
-        ESP_LOGE(TAG, "Wi-Fi station is not connected");
-    } else {
-        ESP_LOGI(TAG, "--- Access Point Information ---");
-        ESP_LOG_BUFFER_HEX("MAC Address", ap_info.bssid, sizeof(ap_info.bssid));
-        ESP_LOG_BUFFER_CHAR("SSID", ap_info.ssid, sizeof(ap_info.ssid));
-        ESP_LOGI(TAG, "Primary Channel: %d", ap_info.primary);
-        ESP_LOGI(TAG, "RSSI: %d", ap_info.rssi);
-
-        camera_loop(mqtt_app_start());
+    if (app_wifi_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize Wi-Fi");
+        return;
     }
 
-    ESP_ERROR_CHECK(app_wifi_disconnect());
+    start_webserver();
 
-    ESP_ERROR_CHECK(app_wifi_deinit());
+    esp_mqtt_client_handle_t client = NULL;
+    camera_loop(client);
 
-    ESP_LOGI(TAG, "End of program");
+    // app_wifi_deinit();
 }
