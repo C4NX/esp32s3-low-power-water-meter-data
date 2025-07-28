@@ -3,6 +3,8 @@
 #include "esp_system.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include <string.h>
+#include <stdlib.h>
 
 static const char *TAG = "config_handler";
 
@@ -32,17 +34,42 @@ char* get_query_value(const char *query, const char *key) {
  * @brief Handle /config POST route
  */
 esp_err_t config_handler(httpd_req_t *req) {
-    char buf[512];
+    char *buf = NULL;
     int ret;
 
-    // Read URL query data
-    size_t recv_size = MIN(req->content_len, sizeof(buf)-1);
-    ret = httpd_req_recv(req, buf, recv_size);
-    if (ret <= 0) {
+    // Check if request is POST
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Only POST method allowed");
+        return ESP_FAIL;
+    }
+
+    // Allocate memory for the request content
+    size_t content_len = req->content_len;
+    if (content_len > 4096) {  // Set a reasonable limit
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Request too large");
+        return ESP_FAIL;
+    }
+    
+    buf = malloc(content_len + 1);
+    if (!buf) {
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    buf[ret] = '\0'; // Null-terminate
+
+    // Read form data
+    int remaining = content_len;
+    int offset = 0;
+    while (remaining > 0) {
+        ret = httpd_req_recv(req, buf + offset, remaining);
+        if (ret <= 0) {
+            free(buf);
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+        remaining -= ret;
+        offset += ret;
+    }
+    buf[content_len] = '\0';  // Null-terminate
 
     // Extract values from the form
     char *ssid = get_query_value(buf, "ssid");
@@ -53,6 +80,7 @@ esp_err_t config_handler(httpd_req_t *req) {
         ESP_LOGE(TAG, "Missing form fields");
         const char *resp = "Error: Missing fields.";
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, resp);
+        free(buf);
         goto cleanup;
     }
 
@@ -104,13 +132,14 @@ esp_err_t config_handler(httpd_req_t *req) {
     nvs_commit(my_handle);
     nvs_close(my_handle);
 
-    const char *resp = "Configuration saved successfully.";
-    httpd_resp_send(req, resp, 200);
+    const char *resp = "Configuration saved successfully. \0";
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
 
 cleanup:
-    free(ssid);
-    free(password);
-    free(mqtt);
+    if (buf) free(buf);
+    if (ssid) free(ssid);
+    if (password) free(password);
+    if (mqtt) free(mqtt);
 
     return ESP_OK;
 }
