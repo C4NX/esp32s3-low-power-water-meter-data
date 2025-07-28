@@ -30,6 +30,87 @@ char* get_query_value(const char *query, const char *key) {
     return NULL;
 }
 
+char* get_config_ssid() {
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error opening NVS handle");
+        return NULL;
+    }
+
+    char *ssid = malloc(33); // 32 chars + null terminator
+    if (!ssid) {
+        ESP_LOGE(TAG, "Memory allocation failed for SSID");
+        nvs_close(my_handle);
+        return NULL;
+    }
+
+    size_t len = 33; // Max length
+    err = nvs_get_str(my_handle, "ssid", ssid, &len);
+    nvs_close(my_handle);
+
+    if (err == ESP_OK) {
+        return ssid;
+    } else {
+        free(ssid);
+        return NULL;
+    }
+}
+
+char* get_config_password() {
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error opening NVS handle");
+        return NULL;
+    }
+
+    char *password = malloc(65); // 64 chars + null terminator
+    if (!password) {
+        ESP_LOGE(TAG, "Memory allocation failed for password");
+        nvs_close(my_handle);
+        return NULL;
+    }
+
+    size_t len = 65; // Max length
+    err = nvs_get_str(my_handle, "password", password, &len);
+    nvs_close(my_handle);
+
+    if (err == ESP_OK) {
+        return password;
+    } else {
+        free(password);
+        return NULL;
+    }
+}
+
+char* get_config_mqtt() {
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error opening NVS handle");
+        return NULL;
+    }
+
+    char *mqtt = malloc(129); // 128 chars + null terminator
+    if (!mqtt) {
+        ESP_LOGE(TAG, "Memory allocation failed for MQTT server");
+        nvs_close(my_handle);
+        return NULL;
+    }
+
+    size_t len = 129; // Max length
+    err = nvs_get_str(my_handle, "mqtt", mqtt, &len);
+    nvs_close(my_handle);
+
+    if (err == ESP_OK) {
+        return mqtt;
+    } else {
+        free(mqtt);
+        return NULL;
+    }
+}
+
 /**
  * @brief Handle /config POST route
  */

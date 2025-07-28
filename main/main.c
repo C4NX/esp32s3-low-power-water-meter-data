@@ -315,12 +315,21 @@ void app_main(void)
         closedir(dir);
     }
 
-    if (app_wifi_init() != ESP_OK) {
+	// TODO: vérifier s'il y a la présence d'une configuration WiFi et une MQTT config
+	char* ssid = get_config_ssid();
+	char* password = get_config_password();
+
+    if (app_wifi_ap_init() != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize Wi-Fi");
         return;
     }
 
     start_webserver();
+
+	app_wifi_sta_init();
+	app_wifi_sta_connect();
+
+	char* mqtt = get_config_mqtt();
 
     esp_mqtt_client_handle_t client = NULL;
     camera_loop(client);
