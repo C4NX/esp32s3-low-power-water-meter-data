@@ -1,8 +1,12 @@
 idf_component_register(
     SRCS
         main.c
-        main_wifi.c
-        config/config_handler.c
+        config/config.c
+        route/config.c
+        route/index.c
+        wifi/ap.c
+        wifi/sta.c
+        mqtt/mqtt.c
 
     PRIV_INCLUDE_DIRS
         .

@@ -16,10 +16,12 @@
 #include "esp_littlefs.h"     // LittleFS
 #include <dirent.h>           // Directory listing
 
-#include "wifi_credentials.h" // Default wifi credentials
-#include "main_wifi.h" // AP/ST Wifi Code
+#include "wifi/ap.h" // Wi-fi Access Point code
+#include "wifi/sta.h" // Wi-fi Station code
+#include "mqtt/mqtt.h" // MQTT client code
 
-#include "config/config_handler.c" // config route 
+#include "route/config.h"
+#include "route/index.h"
 
 // Support for IDF 5.x
 #ifndef portTICK_RATE_MS
@@ -33,10 +35,6 @@
 
 // Logging tag
 #define TAG "main"
-
-// MQTT Broker
-#define MQTT_BROKER_URI "mqtt://broker.hivemq.com"
-#define MQTT_BROKER_TOPIC "IeziPVyPNYnaOW4U/"
 
 // Camera configuration
 // WROVER-KIT PIN Map
@@ -173,37 +171,7 @@ static esp_err_t init_camera(void)
 }
 #endif
 
-static void mqtt_event_handler_cb(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
-{
-    ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
-    esp_mqtt_event_handle_t event = event_data;
-    esp_mqtt_client_handle_t client = event->client;
-    switch ((esp_mqtt_event_id_t)event_id) {
-        case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-            esp_mqtt_client_publish(client, MQTT_BROKER_TOPIC, "Hello from ESP32S3!", 0, 0, 0);
-            break;
-        case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-            break;
-        default:
-            ESP_LOGI(TAG, "Other MQTT event id:%d", event->event_id);
-            break;
-    }
-}
-
-static esp_mqtt_client_handle_t mqtt_app_start(void)
-{
-    esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = MQTT_BROKER_URI,
-    };
-    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
-    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler_cb, client);
-    esp_mqtt_client_start(client);
-    return client;
-}
-
-static void camera_loop(esp_mqtt_client_handle_t client)
+static void main_camera_loop(esp_mqtt_client_handle_t client)
 {
 #if ESP_CAMERA_SUPPORTED
     if(ESP_OK != init_camera()) {
@@ -248,22 +216,6 @@ void mount_littlefs(void)
 
 httpd_handle_t server = NULL;
 
-esp_err_t index_handler(httpd_req_t *req)
-{
-    FILE* f = fopen("/littlefs/index.html", "r");
-    if (!f) {
-        httpd_resp_send_404(req);
-        return ESP_FAIL;
-    }
-    char line[128];
-    while (fgets(line, sizeof(line), f)) {
-        httpd_resp_sendstr_chunk(req, line);
-    }
-    fclose(f);
-    httpd_resp_sendstr_chunk(req, NULL); // End response
-    return ESP_OK;
-}
-
 static void start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -275,13 +227,13 @@ static void start_webserver(void)
         httpd_register_uri_handler(server, &(httpd_uri_t){
             .uri = "/",
             .method = HTTP_GET,
-            .handler = index_handler,
+            .handler = route_index_handler,
             .user_ctx = NULL
         });
         httpd_register_uri_handler(server, &(httpd_uri_t){
             .uri = "/config",
             .method = HTTP_POST,
-            .handler = config_handler,
+            .handler = route_config_handler,
             .user_ctx = NULL
         });
         ESP_LOGI(TAG, "HTTP server started");
@@ -292,19 +244,19 @@ static void start_webserver(void)
 
 void app_main(void)
 {
-
     ESP_LOGI(TAG, "Starting...");
 
     // Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
+        err = nvs_flash_init();
     }
-    ESP_ERROR_CHECK(ret);
+    ESP_ERROR_CHECK(err);
 
+
+    // Initialize LittleFS
     mount_littlefs();
-
     DIR* dir = opendir("/littlefs");
     if (dir != NULL) {
         ESP_LOGI(TAG, "Contents of /littlefs:");
@@ -315,24 +267,77 @@ void app_main(void)
         closedir(dir);
     }
 
-	// TODO: vérifier s'il y a la présence d'une configuration WiFi et une MQTT config
-	char* ssid = get_config_ssid();
-	char* password = get_config_password();
+    // Initialize Event Loop
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    // Initialize Wi-Fi driver
+    ESP_LOGI(TAG, "Initializing Wi-Fi...");
+    app_wifi_init();
+
+    // Initialize Wi-Fi in AP mode
     if (app_wifi_ap_init() != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize Wi-Fi");
+        ESP_LOGE(TAG, "Failed to initialize AP station Wi-Fi");
         return;
     }
 
+
+    // Check for Wi-Fi configuration
+    ESP_LOGI(TAG, "Checking Wi-Fi configuration...");
+
+    char* ssid = app_config_get_ssid();
+    char* password = app_config_get_password();
+
+    // Start Wi-Fi in Station mode if SSID and password are configured
+    if(ssid && password) {
+        err = app_wifi_sta_init();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to initialize STA Wi-Fi");
+            return;
+        }
+        
+        ESP_LOGI(TAG, "Connecting to configured Wi-Fi SSID: %s", ssid);
+        err = app_wifi_sta_connect(ssid, password);
+
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to connect to STA Wi-Fi");
+            ESP_LOGE(TAG, "Error: %s", esp_err_to_name(err));
+
+            app_config_reset();
+            ESP_LOGI(TAG, "Configuration reset due to connection failure, restarting device...");
+            vTaskDelay(pdMS_TO_TICKS(2000)); // Delay for 2 seconds before restart
+            
+            esp_restart();
+
+            return;
+        }
+
+        wifi_ap_record_t ap_info;
+        err = esp_wifi_sta_get_ap_info(&ap_info);
+        if (err == ESP_ERR_WIFI_CONN) {
+            ESP_LOGE(TAG, "Wi-Fi station interface not initialized");
+        }
+        else if (err == ESP_ERR_WIFI_NOT_CONNECT) {
+            ESP_LOGE(TAG, "Wi-Fi station is not connected");
+        } else {
+            ESP_LOGI(TAG, "--- Access Point Information ---");
+            ESP_LOG_BUFFER_HEX("MAC Address", ap_info.bssid, sizeof(ap_info.bssid));
+            ESP_LOG_BUFFER_CHAR("SSID", ap_info.ssid, sizeof(ap_info.ssid));
+            ESP_LOGI(TAG, "Primary Channel: %d", ap_info.primary);
+            ESP_LOGI(TAG, "RSSI: %d", ap_info.rssi);
+
+            // Start MQTT client
+            esp_mqtt_client_handle_t mqtt_client = app_mqtt_start();
+            if (mqtt_client == NULL) {
+                ESP_LOGE(TAG, "Failed to start MQTT client");
+            }else {
+                // Start main camera loop only if AP, STA & MQTT are OK
+                main_camera_loop(mqtt_client);
+            }
+        }
+    }else {
+        ESP_LOGI(TAG, "No Wi-Fi configuration found, starting in AP only mode");
+    }
+
+    // Start web server
     start_webserver();
-
-	app_wifi_sta_init();
-	app_wifi_sta_connect();
-
-	char* mqtt = get_config_mqtt();
-
-    esp_mqtt_client_handle_t client = NULL;
-    camera_loop(client);
-
-    // app_wifi_deinit();
 }

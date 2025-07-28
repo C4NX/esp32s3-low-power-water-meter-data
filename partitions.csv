@@ -1,5 +1,5 @@
 # Name,     Type, SubType, Offset,   Size
 nvs,        data, nvs,     0x11000,  0x6000
 phy_init,   data, phy,     0x17000,  0x1000
-factory,    app,  factory, 0x20000,  1M
-littlefs,   data, littlefs,0x120000, 0xF0000
+factory,    app,  factory, 0x20000,  2M
+littlefs,   data, littlefs,0x220000, 0xF0000

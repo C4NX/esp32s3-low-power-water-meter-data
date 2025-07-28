@@ -1,43 +1,66 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>ESP32 Config</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 Water Meter Config</title>
   <style>
-    body {
+    /* Reset & Base Styles */
+    *, *::before, *::after {
+      box-sizing: border-box;
       margin: 0;
-      height: 100vh;
-      font-family: 'Segoe UI', sans-serif;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1e3c72, #2a5298);
       display: flex;
       align-items: center;
       justify-content: center;
-      background: linear-gradient(135deg, #1e3c72, #2a5298);
-      backdrop-filter: blur(10px);
+      color: #fff;
+      padding: 1rem;
     }
 
+    /* Glass Card */
     .glass-card {
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 16px;
-      padding: 2rem;
-      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+      width: 100%;
+      max-width: 420px;
+      background: rgba(255, 255, 255, 0.12);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      width: 90%;
-      max-width: 400px;
-      color: white;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 1.8rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .glass-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
     }
 
     h1 {
-      margin-top: 0;
+      font-size: 1.6rem;
+      margin-bottom: 0.5rem;
       text-align: center;
-      font-size: 1.5rem;
+      font-weight: 600;
     }
 
+    p {
+      text-align: center;
+      font-size: 0.95rem;
+      opacity: 0.9;
+      margin-bottom: 1.5rem;
+    }
+
+    /* Form */
     form {
       display: flex;
       flex-direction: column;
-      gap: 1rem;
+      gap: 1.2rem;
     }
 
     .input-group {
@@ -46,53 +69,202 @@
     }
 
     .input-group label {
-      margin-bottom: 0.3rem;
       font-size: 0.95rem;
+      margin-bottom: 0.4rem;
+      font-weight: 500;
     }
 
     .input-group input {
-      padding: 0.5rem;
+      padding: 0.7rem 0.9rem;
       border: none;
-      border-radius: 6px;
-      outline: none;
+      border-radius: 8px;
       font-size: 1rem;
-    }
-
-    input[type="submit"] {
-      padding: 0.6rem;
-      font-size: 1rem;
-      border: none;
-      border-radius: 6px;
-      background-color: rgba(255, 255, 255, 0.2);
-      color: white;
-      cursor: pointer;
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
       transition: background 0.3s ease;
     }
 
-    input[type="submit"]:hover {
-      background-color: rgba(255, 255, 255, 0.3);
+    .input-group input::placeholder {
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .input-group input:focus {
+      outline: 2px solid rgba(255, 255, 255, 0.5);
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Submit Button */
+    input[type="submit"] {
+      padding: 0.7rem;
+      font-size: 1.05rem;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.25);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      margin-top: 0.5rem;
+    }
+
+    input[type="submit"]:hover,
+    input[type="submit"]:focus {
+      background: rgba(255, 255, 255, 0.35);
+      transform: scale(1.02);
+    }
+
+    input[type="submit"]:active {
+      transform: scale(0.98);
+    }
+
+    input[type="submit"]:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Alert Message */
+    .alert {
+      padding: 0.9em 1.2em;
+      border-radius: 8px;
+      margin-bottom: 1em;
+      font-size: 0.95rem;
+      font-weight: 500;
+      text-align: center;
+      word-break: break-word;
+      opacity: 0;
+      height: 0;
+      overflow: hidden;
+      transition: opacity 0.4s ease, height 0.4s ease;
+    }
+
+    .alert.show {
+      opacity: 1;
+      height: auto;
+      padding: 0.9em 1.2em;
+      margin-top: -0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .alert.success {
+      background: rgba(46, 184, 135, 0.2);
+      color: hsl(155, 94%, 59%);
+      border: 1px solid rgba(46, 184, 135, 0.3);
+    }
+
+    .alert.error {
+      background: rgba(255, 87, 87, 0.15);
+      color: #cc0000;
+      border: 1px solid rgba(255, 87, 87, 0.3);
+    }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+      h1 {
+        font-size: 1.35rem;
+      }
+
+      p {
+        font-size: 0.9rem;
+      }
+
+      .glass-card {
+        padding: 1.2rem;
+        margin: 0.5rem;
+      }
+
+      .input-group input,
+      input[type="submit"] {
+        font-size: 0.95rem;
+      }
     }
   </style>
 </head>
 <body>
   <div class="glass-card">
-    <h1>Water Meter Config</h1>
-    <p>Please enter your Wi-Fi and MQTT credentials below:</p>
-    <form action="/config" method="POST">
+    <h1>Water Meter Configuration</h1>
+    <p>Enter your Wi-Fi and MQTT settings to connect the device.</p>
+
+    <form id="configForm">
+      <div id="formAlert" class="alert"></div>
+
       <div class="input-group">
-        <label for="ssid">SSID:</label>
-        <input type="text" name="ssid" id="ssid" required>
+        <label for="ssid">Wi-Fi SSID</label>
+        <input type="text" name="ssid" id="ssid" placeholder="Enter network name" required autocomplete="off" />
       </div>
+
       <div class="input-group">
-        <label for="password">Password:</label>
-        <input type="password" name="password" id="password" required>
+        <label for="password">Wi-Fi Password</label>
+        <input type="password" name="password" id="password" placeholder="Enter password" required autocomplete="off" />
       </div>
+
       <div class="input-group">
-        <label for="mqtt">MQTT Server:</label>
-        <input type="text" name="mqtt" id="mqtt" required>
+        <label for="mqtt">MQTT Server</label>
+        <input type="text" name="mqtt" id="mqtt" placeholder="e.g., mqtt://mqtt.example.com:1883" required autocomplete="off" />
       </div>
-      <input type="submit" value="Save">
+
+      <input type="submit" value="Save & Connect" id="submitBtn" />
     </form>
   </div>
+
+  <script>
+    const form = document.getElementById('configForm');
+    const alertBox = document.getElementById('formAlert');
+    const submitBtn = document.getElementById('submitBtn');
+
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+
+      alertBox.classList.remove('show', 'success', 'error');
+      alertBox.textContent = '';
+
+      const formData = new FormData(form);
+      const payload = new URLSearchParams();
+      payload.append('ssid', formData.get('ssid'));
+      payload.append('password', formData.get('password'));
+      payload.append('mqtt', formData.get('mqtt'));
+
+      if (!formData.get('ssid') || !formData.get('mqtt')) {
+        showAlert('Please fill in all fields.', 'error');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.value = 'Saving...';
+
+      try {
+        const response = await fetch('/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: payload.toString()
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          showAlert(result.message || 'Configuration saved successfully!', 'success');
+          form.reset();
+        } else {
+          throw new Error(result.message || 'Failed to save config');
+        }
+      } catch (err) {
+        console.error('Config error:', err);
+        const message = err.message.includes('Failed to fetch')
+          ? 'Unable to reach the device. Check connection and try again.'
+          : err.message;
+        showAlert(message, 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.value = 'Save & Connect';
+      }
+    });
+
+    function showAlert(message, type) {
+      alertBox.textContent = message;
+      alertBox.classList.add('show', type);
+    }
+  </script>
 </body>
 </html>
