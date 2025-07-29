@@ -171,8 +171,37 @@ static esp_err_t init_camera(void)
 }
 #endif
 
+httpd_handle_t server = NULL;
+
+static void start_webserver(void)
+{
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = 80;
+
+    ESP_LOGI(TAG, "Starting HTTP server on port 80");
+
+    if (httpd_start(&server, &config) == ESP_OK) {
+        httpd_register_uri_handler(server, &(httpd_uri_t){
+            .uri = "/",
+            .method = HTTP_GET,
+            .handler = route_index_handler,
+            .user_ctx = NULL
+        });
+        httpd_register_uri_handler(server, &(httpd_uri_t){
+            .uri = "/config",
+            .method = HTTP_POST,
+            .handler = route_config_handler,
+            .user_ctx = NULL
+        });
+        ESP_LOGI(TAG, "HTTP server started");
+    } else {
+        ESP_LOGE(TAG, "Failed to start HTTP server");
+    }
+}
+
 static void main_camera_loop(esp_mqtt_client_handle_t client)
 {
+    start_webserver();
 #if ESP_CAMERA_SUPPORTED
     if(ESP_OK != init_camera()) {
         return;
@@ -214,34 +243,6 @@ void mount_littlefs(void)
     ESP_LOGI(TAG, "LittleFS: total=%d, used=%d", total, used);
 }
 
-httpd_handle_t server = NULL;
-
-static void start_webserver(void)
-{
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = 80;
-
-    ESP_LOGI(TAG, "Starting HTTP server on port 80");
-
-    if (httpd_start(&server, &config) == ESP_OK) {
-        httpd_register_uri_handler(server, &(httpd_uri_t){
-            .uri = "/",
-            .method = HTTP_GET,
-            .handler = route_index_handler,
-            .user_ctx = NULL
-        });
-        httpd_register_uri_handler(server, &(httpd_uri_t){
-            .uri = "/config",
-            .method = HTTP_POST,
-            .handler = route_config_handler,
-            .user_ctx = NULL
-        });
-        ESP_LOGI(TAG, "HTTP server started");
-    } else {
-        ESP_LOGE(TAG, "Failed to start HTTP server");
-    }
-}
-
 void app_main(void)
 {
     ESP_LOGI(TAG, "Starting...");
@@ -270,31 +271,30 @@ void app_main(void)
     // Initialize Event Loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    // Initialize Wi-Fi driver
-    ESP_LOGI(TAG, "Initializing Wi-Fi...");
+
+    // --- Dual AP+STA Mode Initialization ---
+    ESP_LOGI(TAG, "Initializing Wi-Fi in AP+STA mode...");
     app_wifi_init();
 
-    // Initialize Wi-Fi in AP mode
+    // Initialize AP interface
     if (app_wifi_ap_init() != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize AP station Wi-Fi");
+        ESP_LOGE(TAG, "Failed to initialize AP Wi-Fi");
         return;
     }
 
-
     // Check for Wi-Fi configuration
     ESP_LOGI(TAG, "Checking Wi-Fi configuration...");
-
     char* ssid = app_config_get_ssid();
     char* password = app_config_get_password();
 
-    // Start Wi-Fi in Station mode if SSID and password are configured
-    if(ssid && password) {
+    // Initialize STA interface if credentials are present
+    if (ssid && password) {
         err = app_wifi_sta_init();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to initialize STA Wi-Fi");
             return;
         }
-        
+
         ESP_LOGI(TAG, "Connecting to configured Wi-Fi SSID: %s", ssid);
         err = app_wifi_sta_connect(ssid, password);
 
@@ -305,9 +305,7 @@ void app_main(void)
             app_config_reset();
             ESP_LOGI(TAG, "Configuration reset due to connection failure, restarting device...");
             vTaskDelay(pdMS_TO_TICKS(2000)); // Delay for 2 seconds before restart
-            
             esp_restart();
-
             return;
         }
 
@@ -329,12 +327,13 @@ void app_main(void)
             esp_mqtt_client_handle_t mqtt_client = app_mqtt_start();
             if (mqtt_client == NULL) {
                 ESP_LOGE(TAG, "Failed to start MQTT client");
-            }else {
+            } else {
                 // Start main camera loop only if AP, STA & MQTT are OK
                 main_camera_loop(mqtt_client);
+                return;
             }
         }
-    }else {
+    } else {
         ESP_LOGI(TAG, "No Wi-Fi configuration found, starting in AP only mode");
     }
 

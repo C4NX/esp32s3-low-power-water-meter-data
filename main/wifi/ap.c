@@ -27,6 +27,7 @@ static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+// Initialize Wi-Fi in AP+STA mode
 void app_wifi_init(void) {
     // Initialize TCP/IP stack
     ESP_ERROR_CHECK(esp_netif_init());
@@ -34,6 +35,9 @@ void app_wifi_init(void) {
     // Initialize Wi-Fi with default config
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    // Set Wi-Fi mode to AP+STA
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
 }
 
 // Initialize Wi-Fi in AP mode
