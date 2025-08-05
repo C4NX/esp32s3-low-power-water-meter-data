@@ -233,13 +233,8 @@ void camera_detect_task(void *arg) {
     detection_result_t results[8];
 
     // MQTT publish topic
-    static char *publish_topic = NULL; // user requested to use app_config_get_mqtt as topic
-    if (mqtt_client && !publish_topic) {
-        publish_topic = app_config_get_mqtt(); // may return NULL if not configured
-        if (publish_topic) {
-            ESP_LOGI(TAG, "MQTT publish topic: %s", publish_topic);
-        }
-    }
+    int32_t capture_interval = app_config_get_capture_interval();
+    char* broker_topic = app_mqtt_get_broker_topic();
 
     // Camera capture loop
     while (1) {
@@ -260,9 +255,9 @@ void camera_detect_task(void *arg) {
         }
 
         // Publish if MQTT client and topic are available
-        if(mqtt_client && publish_topic) {
+        if(mqtt_client && broker_topic) {
             // JPEG Buffer
-            int msg_id = esp_mqtt_client_publish(mqtt_client, publish_topic, (const char*)pic->buf, (int)pic->len, 0, 0);
+            int msg_id = esp_mqtt_client_publish(mqtt_client, broker_topic, (const char*)pic->buf, (int)pic->len, 0, 0);
             if (msg_id == -1) {
                 ESP_LOGW(TAG, "MQTT publish failed");
             } else {
@@ -284,7 +279,7 @@ void camera_detect_task(void *arg) {
                                        results[i].x1, results[i].y1, results[i].x2, results[i].y2);
                 }
                 offset += snprintf(payload + offset, sizeof(payload) - offset, "] }");
-                int msg_id = esp_mqtt_client_publish(mqtt_client, publish_topic, payload, offset, 0, 0);
+                int msg_id = esp_mqtt_client_publish(mqtt_client, broker_topic, payload, offset, 0, 0);
                 if (msg_id == -1) {
                     ESP_LOGW(TAG, "MQTT publish of detections failed");
                 } else {
@@ -292,7 +287,7 @@ void camera_detect_task(void *arg) {
                 }
             }else { // Send empty detections
                 offset += snprintf(payload + offset, sizeof(payload) - offset, "{ \"detections\": [] }");
-                int msg_id = esp_mqtt_client_publish(mqtt_client, publish_topic, payload, offset, 0, 0);
+                int msg_id = esp_mqtt_client_publish(mqtt_client, broker_topic, payload, offset, 0, 0);
                 if (msg_id == -1) {
                     ESP_LOGW(TAG, "MQTT publish of empty detections failed");
                 } else {
@@ -303,7 +298,9 @@ void camera_detect_task(void *arg) {
         
         esp_camera_fb_return(pic); // release frame
         esp_task_wdt_reset();
-        vTaskDelay(pdMS_TO_TICKS(3000));
+
+        ESP_LOGI(TAG, "Next capture in %" PRId32 " s", (int32_t)capture_interval);
+        vTaskDelay(pdMS_TO_TICKS((int32_t)capture_interval * 1000));
     }
 #else
     ESP_LOGE(TAG, "Camera not supported on this build");

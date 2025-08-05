@@ -8,7 +8,12 @@
 #include "mqtt_client.h"
 #include "esp_event.h"
 
-#define MQTT_BROKER_TOPIC "IeziPVyPNYnaOW4U/"
+
+#include "esp_system.h"
+#include "esp_mac.h"
+
+
+static char *MQTT_BROKER_TOPIC;
 
 static void app_mqtt_event_handler_cb(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
@@ -29,6 +34,50 @@ static void app_mqtt_event_handler_cb(void *handler_args, esp_event_base_t base,
     }
 }
 
+
+// get an unique topic for the device
+// This topic can be used to identify the device uniquely in the MQTT broker
+char* app_mqtt_get_unique_topic(void)
+{
+    uint8_t mac[6];
+    char* topic = NULL;
+
+    // Get the default MAC address (station mode)
+    esp_err_t err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (err != ESP_OK) {
+        ESP_LOGE("MQTT", "Failed to read MAC address: %s", esp_err_to_name(err));
+        return NULL;
+    }
+
+    // Allocate memory for topic string (max: "device-XX:XX:XX:XX:XX:XX\0" = 32 chars)
+    topic = (char*)malloc(32);
+    if (topic == NULL) {
+        ESP_LOGE("MQTT", "Memory allocation failed for topic");
+        return NULL;
+    }
+
+    // Create topic using full MAC for uniqueness: e.g., device-a0:b1:c2:d3:e4:f5
+    int len = snprintf(topic, 32, "device-%02x:%02x:%02x:%02x:%02x:%02x",
+                       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    if (len < 0 || len >= 32) {
+        ESP_LOGE("MQTT", "Topic formatting failed");
+        free(topic);
+        return NULL;
+    }
+
+    return topic;
+}
+
+char* app_mqtt_get_broker_topic(void)
+{
+    if (MQTT_BROKER_TOPIC == NULL) {
+        ESP_LOGE(TAG, "MQTT broker topic is not set");
+        return NULL;
+    }
+    return MQTT_BROKER_TOPIC;
+}
+
 esp_mqtt_client_handle_t app_mqtt_start(void)
 {
     ESP_LOGI(TAG, "Starting MQTT client...");
@@ -40,6 +89,15 @@ esp_mqtt_client_handle_t app_mqtt_start(void)
     if(mqtt_broker_uri == NULL || strlen(mqtt_broker_uri) == 0) {
         ESP_LOGE(TAG, "MQTT broker URI is not configured");
         return NULL;
+    }
+
+    // Get a unique topic for the device
+    MQTT_BROKER_TOPIC = app_mqtt_get_unique_topic();
+    if (MQTT_BROKER_TOPIC == NULL) {
+        ESP_LOGE(TAG, "Failed to get unique MQTT topic");
+        return NULL;
+    }else {
+        ESP_LOGI(TAG, "Using MQTT topic: %s", MQTT_BROKER_TOPIC);
     }
 
     // Initialize MQTT client

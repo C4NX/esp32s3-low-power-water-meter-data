@@ -200,7 +200,12 @@
 
       <div class="input-group">
         <label for="mqtt">MQTT Server</label>
-        <input type="text" name="mqtt" id="mqtt" placeholder="e.g., mqtt://mqtt.example.com:1883" required autocomplete="off" />
+        <input type="text" name="mqtt" id="mqtt" placeholder="e.g., mqtt://broker.hivemq.com" required autocomplete="off" />
+      </div>
+
+      <div class="input-group">
+        <label for="capture_interval">Capture Interval (seconds)</label>
+        <input type="number" name="capture_interval" id="capture_interval" placeholder="Enter interval in seconds" min="1" value="60" required />
       </div>
 
       <input type="submit" value="Save & Connect" id="submitBtn" />
@@ -223,8 +228,9 @@
       payload.append('ssid', formData.get('ssid'));
       payload.append('password', formData.get('password'));
       payload.append('mqtt', formData.get('mqtt'));
+      payload.append('capture_interval', formData.get('capture_interval'));
 
-      if (!formData.get('ssid') || !formData.get('mqtt')) {
+      if (!formData.get('ssid') || !formData.get('mqtt') || !formData.get('capture_interval')) {
         showAlert('Please fill in all fields.', 'error');
         return;
       }
