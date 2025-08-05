@@ -1,4 +1,22 @@
 dependencies:
+  espressif/esp-dl:
+    component_hash: 996c9d5ae81ebbb38d3e70314cccdae6e2ae0908842fad3512cff60db734635c
+    dependencies:
+    - name: espressif/esp_new_jpeg
+      registry_url: https://components.espressif.com
+      require: private
+      version: ^0.6.1
+    - name: idf
+      require: private
+      version: '>=5.3'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32
+    - esp32s3
+    - esp32p4
+    version: 3.1.5
   espressif/esp32-camera:
     component_hash: a4612fc70434dc400ac7021727fae7b53fabd8d07951833e61f6bd87cadc1b93
     dependencies:
@@ -20,6 +38,22 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.3.1
+  espressif/esp_new_jpeg:
+    component_hash: e6af208a875abd0ecfc0213d3751a11b504b463ebde6930f24096047925fa5c1
+    dependencies: []
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32c2
+    - esp32c3
+    - esp32c5
+    - esp32c6
+    version: 0.6.1
   idf:
     source:
       type: idf
@@ -35,8 +69,9 @@ dependencies:
       type: service
     version: 1.20.1
 direct_dependencies:
+- espressif/esp-dl
 - espressif/esp32-camera
 - joltwallet/littlefs
-manifest_hash: eee4ab6c66640c33580173da2cafa4ae1c0084796bbdeb27162b2f331e632ddd
+manifest_hash: d5889995a4c321aa421a9d8fca009a7594e1be60a55d620e1b78929d214423c9
 target: esp32s3
 version: 2.0.0
