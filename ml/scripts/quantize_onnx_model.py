@@ -60,7 +60,7 @@ def quant_yolo11n(imgsz):
     )
 
     yolo11n_caib_url = "https://dl.espressif.com/public/calib_yolo11n.zip"
-    CALIB_DIR = "calib_yolo11n"
+    CALIB_DIR = os.path.join(script_dir, "../calib_yolo11n")
     urllib.request.urlretrieve(
         yolo11n_caib_url, "calib_yolo11n.zip", reporthook=report_hook
     )
