@@ -19,6 +19,7 @@
 #include "wifi/ap.h" // Wi-fi Access Point code
 #include "wifi/sta.h" // Wi-fi Station code
 #include "mqtt/mqtt.h" // MQTT client code
+#include "dl/dl_wrapper.h" // ESP-DL (C++) wrapper code
 
 #include "route/config.h"
 #include "route/index.h"
@@ -145,7 +146,7 @@ static camera_config_t camera_config = {
     .pin_pclk = CAM_PIN_PCLK,
 
     //XCLK 20MHz or 10MHz for OV2640 double FPS (Experimental)
-    .xclk_freq_hz = 20000000,
+    .xclk_freq_hz = 10000000,
     .ledc_timer = LEDC_TIMER_0,
     .ledc_channel = LEDC_CHANNEL_0,
 
@@ -201,7 +202,7 @@ static void start_webserver(void)
 
 static void main_camera_loop(esp_mqtt_client_handle_t client)
 {
-    start_webserver();
+    // start_webserver();
 #if ESP_CAMERA_SUPPORTED
     if(ESP_OK != init_camera()) {
         return;
@@ -212,9 +213,20 @@ static void main_camera_loop(esp_mqtt_client_handle_t client)
         ESP_LOGI(TAG, "Taking picture...");
         camera_fb_t *pic = esp_camera_fb_get();
 
-        // esp_mqtt_client_publish(client, MQTT_BROKER_TOPIC, (const char *)pic->buf, pic->len, 0, 0);
+        if (!pic) {
+            ESP_LOGE(TAG, "Camera capture failed");
+            continue;
+        }
 
         ESP_LOGI(TAG, "Picture taken! Its size was: %zu bytes", pic->len);
+
+        detection_result_t results[8];
+        int result_count = app_run_digit_detection(pic->buf, pic->len, results, 8);
+
+        ESP_LOGI(TAG, "Detection results (from main): %d", result_count);
+
+        // esp_mqtt_client_publish(client, MQTT_BROKER_TOPIC, (const char *)pic->buf, pic->len, 0, 0);
+
         esp_camera_fb_return(pic);
 
         vTaskDelay(5000 / portTICK_RATE_MS);
@@ -270,73 +282,74 @@ void app_main(void)
 
     // Initialize Event Loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    
+    main_camera_loop(NULL);
 
+    // // --- Dual AP+STA Mode Initialization ---
+    // ESP_LOGI(TAG, "Initializing Wi-Fi in AP+STA mode...");
+    // app_wifi_init();
 
-    // --- Dual AP+STA Mode Initialization ---
-    ESP_LOGI(TAG, "Initializing Wi-Fi in AP+STA mode...");
-    app_wifi_init();
+    // // Initialize AP interface
+    // if (app_wifi_ap_init() != ESP_OK) {
+    //     ESP_LOGE(TAG, "Failed to initialize AP Wi-Fi");
+    //     return;
+    // }
 
-    // Initialize AP interface
-    if (app_wifi_ap_init() != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize AP Wi-Fi");
-        return;
-    }
+    // // Check for Wi-Fi configuration
+    // ESP_LOGI(TAG, "Checking Wi-Fi configuration...");
+    // char* ssid = app_config_get_ssid();
+    // char* password = app_config_get_password();
 
-    // Check for Wi-Fi configuration
-    ESP_LOGI(TAG, "Checking Wi-Fi configuration...");
-    char* ssid = app_config_get_ssid();
-    char* password = app_config_get_password();
+    // // Initialize STA interface if credentials are present
+    // if (ssid && password) {
+    //     err = app_wifi_sta_init();
+    //     if (err != ESP_OK) {
+    //         ESP_LOGE(TAG, "Failed to initialize STA Wi-Fi");
+    //         return;
+    //     }
 
-    // Initialize STA interface if credentials are present
-    if (ssid && password) {
-        err = app_wifi_sta_init();
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to initialize STA Wi-Fi");
-            return;
-        }
+    //     ESP_LOGI(TAG, "Connecting to configured Wi-Fi SSID: %s", ssid);
+    //     err = app_wifi_sta_connect(ssid, password);
 
-        ESP_LOGI(TAG, "Connecting to configured Wi-Fi SSID: %s", ssid);
-        err = app_wifi_sta_connect(ssid, password);
+    //     if (err != ESP_OK) {
+    //         ESP_LOGE(TAG, "Failed to connect to STA Wi-Fi");
+    //         ESP_LOGE(TAG, "Error: %s", esp_err_to_name(err));
 
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to connect to STA Wi-Fi");
-            ESP_LOGE(TAG, "Error: %s", esp_err_to_name(err));
+    //         app_config_reset();
+    //         ESP_LOGI(TAG, "Configuration reset due to connection failure, restarting device...");
+    //         vTaskDelay(pdMS_TO_TICKS(2000)); // Delay for 2 seconds before restart
+    //         esp_restart();
+    //         return;
+    //     }
 
-            app_config_reset();
-            ESP_LOGI(TAG, "Configuration reset due to connection failure, restarting device...");
-            vTaskDelay(pdMS_TO_TICKS(2000)); // Delay for 2 seconds before restart
-            esp_restart();
-            return;
-        }
+    //     wifi_ap_record_t ap_info;
+    //     err = esp_wifi_sta_get_ap_info(&ap_info);
+    //     if (err == ESP_ERR_WIFI_CONN) {
+    //         ESP_LOGE(TAG, "Wi-Fi station interface not initialized");
+    //     }
+    //     else if (err == ESP_ERR_WIFI_NOT_CONNECT) {
+    //         ESP_LOGE(TAG, "Wi-Fi station is not connected");
+    //     } else {
+    //         ESP_LOGI(TAG, "--- Access Point Information ---");
+    //         ESP_LOG_BUFFER_HEX("MAC Address", ap_info.bssid, sizeof(ap_info.bssid));
+    //         ESP_LOG_BUFFER_CHAR("SSID", ap_info.ssid, sizeof(ap_info.ssid));
+    //         ESP_LOGI(TAG, "Primary Channel: %d", ap_info.primary);
+    //         ESP_LOGI(TAG, "RSSI: %d", ap_info.rssi);
 
-        wifi_ap_record_t ap_info;
-        err = esp_wifi_sta_get_ap_info(&ap_info);
-        if (err == ESP_ERR_WIFI_CONN) {
-            ESP_LOGE(TAG, "Wi-Fi station interface not initialized");
-        }
-        else if (err == ESP_ERR_WIFI_NOT_CONNECT) {
-            ESP_LOGE(TAG, "Wi-Fi station is not connected");
-        } else {
-            ESP_LOGI(TAG, "--- Access Point Information ---");
-            ESP_LOG_BUFFER_HEX("MAC Address", ap_info.bssid, sizeof(ap_info.bssid));
-            ESP_LOG_BUFFER_CHAR("SSID", ap_info.ssid, sizeof(ap_info.ssid));
-            ESP_LOGI(TAG, "Primary Channel: %d", ap_info.primary);
-            ESP_LOGI(TAG, "RSSI: %d", ap_info.rssi);
+    //         // Start MQTT client
+    //         esp_mqtt_client_handle_t mqtt_client = app_mqtt_start();
+    //         if (mqtt_client == NULL) {
+    //             ESP_LOGE(TAG, "Failed to start MQTT client");
+    //         } else {
+    //             // Start main camera loop only if AP, STA & MQTT are OK
+    //             main_camera_loop(mqtt_client);
+    //             return;
+    //         }
+    //     }
+    // } else {
+    //     ESP_LOGI(TAG, "No Wi-Fi configuration found, starting in AP only mode");
+    // }
 
-            // Start MQTT client
-            esp_mqtt_client_handle_t mqtt_client = app_mqtt_start();
-            if (mqtt_client == NULL) {
-                ESP_LOGE(TAG, "Failed to start MQTT client");
-            } else {
-                // Start main camera loop only if AP, STA & MQTT are OK
-                main_camera_loop(mqtt_client);
-                return;
-            }
-        }
-    } else {
-        ESP_LOGI(TAG, "No Wi-Fi configuration found, starting in AP only mode");
-    }
-
-    // Start web server
-    start_webserver();
+    // // Start web server
+    // start_webserver();
 }

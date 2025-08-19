@@ -7,6 +7,7 @@ idf_component_register(
         wifi/ap.c
         wifi/sta.c
         mqtt/mqtt.c
+        dl/dl_wrapper.cpp
 
     PRIV_INCLUDE_DIRS
         .
@@ -18,7 +19,11 @@ idf_component_register(
         esp_netif
         esp_psram
 		esp_timer
-		esp_http_server
+        esp_http_server
         mqtt
-		littlefs
+        littlefs
+        esp32-camera
 )
+
+# Suppress noisy warnings for designated initializers when compiling as C++
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-missing-field-initializers)
