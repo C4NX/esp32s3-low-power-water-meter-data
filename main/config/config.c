@@ -6,15 +6,19 @@
 
 #define TAG "config"
 
-// Expose config keys as const char*
-const char *CONFIG_KEY_SSID = "ssid";
-const char *CONFIG_KEY_PASSWORD = "password";
-const char *CONFIG_KEY_MQTT = "mqtt";
+#define CONFIG_NVS_NAMESPACE "app_config"
 
-esp_err_t app_config_set(const char *ssid, const char *password, const char *mqtt)
+#define CONFIG_KEY_SSID "ssid"
+#define CONFIG_KEY_PASSWORD "password"
+#define CONFIG_KEY_MQTT "mqtt"
+#define CONFIG_KEY_CAPTURE_INTERVAL "capt_intr"
+
+#define CONFIG_DEFAULT_CAPTURE_INTERVAL 10 // 10 seconds
+
+esp_err_t app_config_set(const char *ssid, const char *password, const char *mqtt, uint32_t capture_interval)
 {
     nvs_handle_t handle;
-    esp_err_t err = nvs_open("app_config", NVS_READWRITE, &handle);
+    esp_err_t err = nvs_open(CONFIG_NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return err;
@@ -44,6 +48,14 @@ esp_err_t app_config_set(const char *ssid, const char *password, const char *mqt
         return err;
     }
 
+    // Set Interval
+    err = nvs_set_u32(handle, CONFIG_KEY_CAPTURE_INTERVAL, capture_interval);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set Capture Interval: %s", esp_err_to_name(err));
+        nvs_close(handle);
+        return err;
+    }
+
     // Commit changes
     err = nvs_commit(handle);
     if (err != ESP_OK) {
@@ -58,7 +70,7 @@ esp_err_t app_config_set(const char *ssid, const char *password, const char *mqt
 
 char* app_config_get_mqtt(void) {
     nvs_handle_t handle;
-    esp_err_t err = nvs_open("app_config", NVS_READONLY, &handle);
+    esp_err_t err = nvs_open(CONFIG_NVS_NAMESPACE, NVS_READONLY, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return NULL;
@@ -94,7 +106,7 @@ char* app_config_get_mqtt(void) {
 char* app_config_get_ssid(void)
 {
     nvs_handle_t handle;
-    esp_err_t err = nvs_open("app_config", NVS_READONLY, &handle);
+    esp_err_t err = nvs_open(CONFIG_NVS_NAMESPACE, NVS_READONLY, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return NULL;
@@ -130,7 +142,7 @@ char* app_config_get_ssid(void)
 char* app_config_get_password(void)
 {
     nvs_handle_t handle;
-    esp_err_t err = nvs_open("app_config", NVS_READONLY, &handle);
+    esp_err_t err = nvs_open(CONFIG_NVS_NAMESPACE, NVS_READONLY, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return NULL;
@@ -163,10 +175,31 @@ char* app_config_get_password(void)
     return password;
 }
 
+uint32_t app_config_get_capture_interval(void)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(CONFIG_NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
+        return CONFIG_DEFAULT_CAPTURE_INTERVAL;
+    }
+
+    uint32_t capture_interval = 0;
+    err = nvs_get_u32(handle, CONFIG_KEY_CAPTURE_INTERVAL, &capture_interval);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get Capture Interval: %s", esp_err_to_name(err));
+        nvs_close(handle);
+        return CONFIG_DEFAULT_CAPTURE_INTERVAL;
+    }
+
+    nvs_close(handle);
+    return capture_interval;
+}
+
 esp_err_t app_config_reset(void)
 {
     nvs_handle_t handle;
-    esp_err_t err = nvs_open("app_config", NVS_READWRITE, &handle);
+    esp_err_t err = nvs_open(CONFIG_NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS handle: %s", esp_err_to_name(err));
         return err;

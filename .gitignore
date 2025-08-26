@@ -42,3 +42,8 @@ cmake-build-debug/
 fdb_version.h
 
 managed_components/
+
+# Virtual environments
+/ml/esp-ppq-env/
+venv/
+.venv/

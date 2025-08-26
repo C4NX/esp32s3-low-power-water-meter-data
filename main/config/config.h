@@ -28,13 +28,19 @@ char *app_config_get_ssid(void);
 char *app_config_get_password(void);
 
 /**
+ * @brief Get the capture interval (in seconds) from the configuration stored in NVS
+ */
+uint32_t app_config_get_capture_interval(void);
+
+/**
  * @brief Set the configuration values (SSID, password, MQTT) in NVS
  * @param ssid SSID to set
  * @param password Password to set
  * @param mqtt MQTT broker address to set
+ * @param capture_interval Capture interval in seconds to set
  * @return ESP_OK if all values were written successfully, an error code otherwise
  */
-esp_err_t app_config_set(const char *ssid, const char *password, const char *mqtt);
+esp_err_t app_config_set(const char *ssid, const char *password, const char *mqtt, const uint32_t capture_interval);
 
 /**
  * @brief Reset the configuration stored in NVS

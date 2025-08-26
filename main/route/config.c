@@ -100,9 +100,10 @@ esp_err_t route_config_handler(httpd_req_t *req) {
     char *ssid = get_query_value(buf, "ssid");
     char *password = get_query_value(buf, "password");
     char *mqtt = get_query_value(buf, "mqtt");
+    char *capture_interval = get_query_value(buf, "capture_interval");
 
     // Check all required fields
-    if (!ssid || !password || !mqtt) {
+    if (!ssid || !password || !mqtt || !capture_interval) {
         ESP_LOGE(TAG, "Missing form fields");
         const char *resp = "{\"status\":\"error\",\"message\":\"Missing fields.\"}";
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, resp);
@@ -113,6 +114,7 @@ esp_err_t route_config_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "SSID: %s", ssid);
     ESP_LOGI(TAG, "Password: %s", password);
     ESP_LOGI(TAG, "MQTT: %s", mqtt);
+    ESP_LOGI(TAG, "Capture Interval: %s", capture_interval);
 
     // Validate inputs
     if (strlen(ssid) > APP_CONFIG_MAX_SSID_LEN) {
@@ -136,8 +138,18 @@ esp_err_t route_config_handler(httpd_req_t *req) {
         goto cleanup;
     }
 
+    // Validate capture interval
+    char *endptr;
+    long interval = strtol(capture_interval, &endptr, 10);
+    if (*endptr != '\0' || interval <= 0 || interval > 3600) {
+        ESP_LOGE(TAG, "Invalid capture interval");
+        const char *resp = "{\"status\":\"error\",\"message\":\"Capture interval must be a positive integer <= 3600 seconds.\"}";
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, resp);
+        goto cleanup;
+    }
+
     // Save configuration to NVS
-    app_config_set(ssid, password, mqtt);
+    app_config_set(ssid, password, mqtt, (uint32_t)interval);
     ESP_LOGI(TAG, "Configuration saved successfully");
 
     // Return success response as JSON
@@ -154,6 +166,7 @@ cleanup:
     if (ssid) free(ssid);
     if (password) free(password);
     if (mqtt) free(mqtt);
+    if (capture_interval) free(capture_interval);
 
     return ESP_OK;
 }

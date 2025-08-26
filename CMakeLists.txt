@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.5)
 
 set(COMPONENTS main)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(camera_example)
+project(water_meter_project)
 
 # LittleFS partition
 littlefs_create_partition_image(littlefs ${CMAKE_SOURCE_DIR}/littlefs FLASH_IN_PROJECT)
