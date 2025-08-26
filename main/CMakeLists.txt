@@ -9,6 +9,9 @@ idf_component_register(
         mqtt/mqtt.c
         dl/dl_wrapper.cpp
 
+    EMBED_FILES 
+        model/best.espdl
+
     PRIV_INCLUDE_DIRS
         .
 

@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "esp_event.h"
 #include "esp_sleep.h"
+#include "esp_task_wdt.h"
 #include "sys/param.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,6 +21,7 @@
 #include "wifi/sta.h" // Wi-fi Station code
 #include "mqtt/mqtt.h" // MQTT client code
 #include "dl/dl_wrapper.h" // ESP-DL (C++) wrapper code
+#include "config/config.h" // For app_config_get_mqtt
 
 #include "route/config.h"
 #include "route/index.h"
@@ -40,8 +42,6 @@
 // Camera configuration
 // WROVER-KIT PIN Map
 #ifdef BOARD_WROVER_KIT
-
-#define TAG "main"
 
 #define CAM_PIN_PWDN -1  //power down is not used
 #define CAM_PIN_RESET -1 //software reset will be performed
@@ -124,7 +124,7 @@
 #define CAM_PIN_D7 16
 #endif
 
-// Camera config
+// Camera configuration (moved back to global scope)
 #if ESP_CAMERA_SUPPORTED
 static camera_config_t camera_config = {
     .pin_pwdn = CAM_PIN_PWDN,
@@ -146,34 +146,30 @@ static camera_config_t camera_config = {
     .pin_pclk = CAM_PIN_PCLK,
 
     //XCLK 20MHz or 10MHz for OV2640 double FPS (Experimental)
-    .xclk_freq_hz = 10000000,
+    .xclk_freq_hz = 5000000, // lower XCLK to reduce capture rate while inference is long
     .ledc_timer = LEDC_TIMER_0,
     .ledc_channel = LEDC_CHANNEL_0,
 
-    .pixel_format = PIXFORMAT_JPEG, //YUV422,GRAYSCALE,RGB565,JPEG
-    .frame_size = FRAMESIZE_QVGA,    //QQVGA-UXGA, For ESP32, do not use sizes above QVGA when not JPEG. The performance of the ESP32-S series has improved a lot, but JPEG mode always gives better frame rates.
-
-    .jpeg_quality = 12, //0-63, for OV series camera sensors, lower number means higher quality
-    .fb_count = 1,       //When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
+    .pixel_format = PIXFORMAT_JPEG,
+    .frame_size = FRAMESIZE_QQVGA,
+    .jpeg_quality = 12,
+    .fb_count = 2,
     .fb_location = CAMERA_FB_IN_PSRAM,
-    .grab_mode = CAMERA_GRAB_WHEN_EMPTY,
+    .grab_mode = CAMERA_GRAB_LATEST,
 };
 
-static esp_err_t init_camera(void)
-{
+static esp_err_t init_camera(void) {
     esp_err_t err = esp_camera_init(&camera_config);
-    if (err != ESP_OK)
-    {
+    if (err != ESP_OK) {
         ESP_LOGE(TAG, "Camera Init Failed");
-        return err;
     }
-
-    return ESP_OK;
+    return err;
 }
-#endif
+#endif // ESP_CAMERA_SUPPORTED
 
 httpd_handle_t server = NULL;
 
+// Start web server on port 80
 static void start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -200,43 +196,7 @@ static void start_webserver(void)
     }
 }
 
-static void main_camera_loop(esp_mqtt_client_handle_t client)
-{
-    // start_webserver();
-#if ESP_CAMERA_SUPPORTED
-    if(ESP_OK != init_camera()) {
-        return;
-    }
-
-    while (1)
-    {
-        ESP_LOGI(TAG, "Taking picture...");
-        camera_fb_t *pic = esp_camera_fb_get();
-
-        if (!pic) {
-            ESP_LOGE(TAG, "Camera capture failed");
-            continue;
-        }
-
-        ESP_LOGI(TAG, "Picture taken! Its size was: %zu bytes", pic->len);
-
-        detection_result_t results[8];
-        int result_count = app_run_digit_detection(pic->buf, pic->len, results, 8);
-
-        ESP_LOGI(TAG, "Detection results (from main): %d", result_count);
-
-        // esp_mqtt_client_publish(client, MQTT_BROKER_TOPIC, (const char *)pic->buf, pic->len, 0, 0);
-
-        esp_camera_fb_return(pic);
-
-        vTaskDelay(5000 / portTICK_RATE_MS);
-    }
-#else
-    ESP_LOGE(TAG, "Camera support is not available for this chip");
-    return;
-#endif
-}
-
+// Mount LittleFS
 void mount_littlefs(void)
 {
     const esp_vfs_littlefs_conf_t conf = {
@@ -255,11 +215,106 @@ void mount_littlefs(void)
     ESP_LOGI(TAG, "LittleFS: total=%d, used=%d", total, used);
 }
 
-void app_main(void)
-{
-    ESP_LOGI(TAG, "Starting...");
+void camera_detect_task(void *arg) {
+    esp_mqtt_client_handle_t mqtt_client = (esp_mqtt_client_handle_t)arg;
+    ESP_LOGI(TAG, "Camera detect task starting");
+#if ESP_CAMERA_SUPPORTED
+    static bool camera_initialized = false;
+    if (!camera_initialized) {
+        if (ESP_OK != init_camera()) {
+            ESP_LOGE(TAG, "Camera init failed in task");
+            vTaskDelete(NULL);
+            return;
+        }
+        camera_initialized = true;
+    }
+    // Register this task with WDT
+    esp_task_wdt_add(NULL);
+    detection_result_t results[8];
 
-    // Initialize NVS
+    // MQTT publish topic
+    static char *publish_topic = NULL; // user requested to use app_config_get_mqtt as topic
+    if (mqtt_client && !publish_topic) {
+        publish_topic = app_config_get_mqtt(); // may return NULL if not configured
+        if (publish_topic) {
+            ESP_LOGI(TAG, "MQTT publish topic: %s", publish_topic);
+        }
+    }
+
+    // Camera capture loop
+    while (1) {
+        esp_task_wdt_reset();
+        camera_fb_t *pic = esp_camera_fb_get();
+        if (!pic) {
+            ESP_LOGW(TAG, "No frame (camera_fb_get returned NULL)");
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+        int64_t t0 = esp_timer_get_time();
+        int det = app_run_digit_detection(pic->buf, pic->len, results, 8);
+        int64_t t1 = esp_timer_get_time();
+        if (det >= 0) {
+            ESP_LOGI(TAG, "Detection done: %d objects in %.2f ms", det, (t1 - t0)/1000.0);
+        } else {
+            ESP_LOGW(TAG, "Detection failed on frame");
+        }
+
+        // Publish if MQTT client and topic are available
+        if(mqtt_client && publish_topic) {
+            // JPEG Buffer
+            int msg_id = esp_mqtt_client_publish(mqtt_client, publish_topic, (const char*)pic->buf, (int)pic->len, 0, 0);
+            if (msg_id == -1) {
+                ESP_LOGW(TAG, "MQTT publish failed");
+            } else {
+                ESP_LOGI(TAG, "MQTT published frame len=%u msg_id=%d", (unsigned)pic->len, msg_id);
+            }
+
+            // Detections as JSON
+            char payload[256];
+            int offset = 0;
+            if(det > 0) {
+                offset += snprintf(payload + offset, sizeof(payload) - offset, "{ \"detections\": [");
+                for (int i = 0; i < det && i < 8; i++) {
+                    if (i > 0) {
+                        offset += snprintf(payload + offset, sizeof(payload) - offset, ", ");
+                    }
+                    offset += snprintf(payload + offset, sizeof(payload) - offset,
+                                       "{ \"category\": %d, \"score\": %.2f, \"box\": [%d, %d, %d, %d] }",
+                                       results[i].category, results[i].score,
+                                       results[i].x1, results[i].y1, results[i].x2, results[i].y2);
+                }
+                offset += snprintf(payload + offset, sizeof(payload) - offset, "] }");
+                int msg_id = esp_mqtt_client_publish(mqtt_client, publish_topic, payload, offset, 0, 0);
+                if (msg_id == -1) {
+                    ESP_LOGW(TAG, "MQTT publish of detections failed");
+                } else {
+                    ESP_LOGI(TAG, "MQTT published detections msg_id=%d", msg_id);
+                }
+            }else { // Send empty detections
+                offset += snprintf(payload + offset, sizeof(payload) - offset, "{ \"detections\": [] }");
+                int msg_id = esp_mqtt_client_publish(mqtt_client, publish_topic, payload, offset, 0, 0);
+                if (msg_id == -1) {
+                    ESP_LOGW(TAG, "MQTT publish of empty detections failed");
+                } else {
+                    ESP_LOGI(TAG, "MQTT published empty detections msg_id=%d", msg_id);
+                }
+            }
+        }
+        
+        esp_camera_fb_return(pic); // release frame
+        esp_task_wdt_reset();
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+#else
+    ESP_LOGE(TAG, "Camera not supported on this build");
+#endif
+    vTaskDelete(NULL);
+}
+
+void app_main(void) {
+    ESP_LOGI(TAG, "Starting...");
+    
+    // NVS
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -267,89 +322,40 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
+    // Watchdog
+    ESP_ERROR_CHECK(esp_task_wdt_deinit());
+    esp_task_wdt_config_t wdt_config = { .timeout_ms = 60000, .trigger_panic = false };
+    ESP_ERROR_CHECK(esp_task_wdt_init(&wdt_config));
 
-    // Initialize LittleFS
+    // Filesystem
     mount_littlefs();
-    DIR* dir = opendir("/littlefs");
-    if (dir != NULL) {
-        ESP_LOGI(TAG, "Contents of /littlefs:");
-        struct dirent* ent;
-        while ((ent = readdir(dir)) != NULL) {
-            ESP_LOGI(TAG, "  - %s", ent->d_name);
+
+    // Event loop
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    // Wi-Fi (AP + attempt STA)
+    app_wifi_init();
+    if (app_wifi_ap_init() != ESP_OK) {
+        ESP_LOGE(TAG, "AP init failed, unable to start");
+        return;
+    }
+    char *ssid = app_config_get_ssid();
+    char *password = app_config_get_password();
+    esp_mqtt_client_handle_t mqtt_client = NULL;
+    if (ssid && password) {
+        if (app_wifi_sta_init() == ESP_OK) {
+            if (app_wifi_sta_connect(ssid, password) == ESP_OK) {
+                mqtt_client = app_mqtt_start();
+                xTaskCreatePinnedToCore(camera_detect_task, "cam_detect", 12288, mqtt_client, 4, NULL, 0);
+            } else {
+                ESP_LOGW(TAG, "STA connect failed");
+            }
         }
-        closedir(dir);
     }
 
-    // Initialize Event Loop
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    
-    main_camera_loop(NULL);
+    if (ssid) free(ssid);
+    if (password) free(password);
 
-    // // --- Dual AP+STA Mode Initialization ---
-    // ESP_LOGI(TAG, "Initializing Wi-Fi in AP+STA mode...");
-    // app_wifi_init();
-
-    // // Initialize AP interface
-    // if (app_wifi_ap_init() != ESP_OK) {
-    //     ESP_LOGE(TAG, "Failed to initialize AP Wi-Fi");
-    //     return;
-    // }
-
-    // // Check for Wi-Fi configuration
-    // ESP_LOGI(TAG, "Checking Wi-Fi configuration...");
-    // char* ssid = app_config_get_ssid();
-    // char* password = app_config_get_password();
-
-    // // Initialize STA interface if credentials are present
-    // if (ssid && password) {
-    //     err = app_wifi_sta_init();
-    //     if (err != ESP_OK) {
-    //         ESP_LOGE(TAG, "Failed to initialize STA Wi-Fi");
-    //         return;
-    //     }
-
-    //     ESP_LOGI(TAG, "Connecting to configured Wi-Fi SSID: %s", ssid);
-    //     err = app_wifi_sta_connect(ssid, password);
-
-    //     if (err != ESP_OK) {
-    //         ESP_LOGE(TAG, "Failed to connect to STA Wi-Fi");
-    //         ESP_LOGE(TAG, "Error: %s", esp_err_to_name(err));
-
-    //         app_config_reset();
-    //         ESP_LOGI(TAG, "Configuration reset due to connection failure, restarting device...");
-    //         vTaskDelay(pdMS_TO_TICKS(2000)); // Delay for 2 seconds before restart
-    //         esp_restart();
-    //         return;
-    //     }
-
-    //     wifi_ap_record_t ap_info;
-    //     err = esp_wifi_sta_get_ap_info(&ap_info);
-    //     if (err == ESP_ERR_WIFI_CONN) {
-    //         ESP_LOGE(TAG, "Wi-Fi station interface not initialized");
-    //     }
-    //     else if (err == ESP_ERR_WIFI_NOT_CONNECT) {
-    //         ESP_LOGE(TAG, "Wi-Fi station is not connected");
-    //     } else {
-    //         ESP_LOGI(TAG, "--- Access Point Information ---");
-    //         ESP_LOG_BUFFER_HEX("MAC Address", ap_info.bssid, sizeof(ap_info.bssid));
-    //         ESP_LOG_BUFFER_CHAR("SSID", ap_info.ssid, sizeof(ap_info.ssid));
-    //         ESP_LOGI(TAG, "Primary Channel: %d", ap_info.primary);
-    //         ESP_LOGI(TAG, "RSSI: %d", ap_info.rssi);
-
-    //         // Start MQTT client
-    //         esp_mqtt_client_handle_t mqtt_client = app_mqtt_start();
-    //         if (mqtt_client == NULL) {
-    //             ESP_LOGE(TAG, "Failed to start MQTT client");
-    //         } else {
-    //             // Start main camera loop only if AP, STA & MQTT are OK
-    //             main_camera_loop(mqtt_client);
-    //             return;
-    //         }
-    //     }
-    // } else {
-    //     ESP_LOGI(TAG, "No Wi-Fi configuration found, starting in AP only mode");
-    // }
-
-    // // Start web server
-    // start_webserver();
+    // Start web server, even if no Wi-Fi
+    start_webserver();
 }

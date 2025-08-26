@@ -32,6 +32,8 @@ typedef struct {
 int app_run_digit_detection(uint8_t* buf, size_t len,
                        detection_result_t* results, int max_results);
 
+int app_run_digit_detection_on_test_image();
+
 #ifdef __cplusplus
 }
 
@@ -53,7 +55,7 @@ int app_run_digit_detection(uint8_t* buf, size_t len,
  * with inference helpers as needed.
  */
 
-class WaterMeterDetect : public dl::detect::DetectWrapper {
+class WaterMeterDetect : public dl::detect::DetectImpl {
 public:
     /**
      * Construct the wrapper.
@@ -62,10 +64,6 @@ public:
     WaterMeterDetect(const char *model_name);
     ~WaterMeterDetect();
 
-private:
-    dl::Model *m_model {nullptr};
-    dl::image::ImagePreprocessor *m_image_preprocessor {nullptr};
-    dl::detect::yolo11PostProcessor *m_postprocessor {nullptr};
 };
 #endif
 
